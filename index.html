@@ -23,7 +23,7 @@
            background: rgba(15, 18, 23, .86); color: #f1f3f5; font-size: 12px; border-radius: 6px; padding: 4px 10px; pointer-events: none; }
   #teams i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
   #sheet { position: fixed; z-index: 1000; left: 8px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom));
-           background: rgba(15, 18, 23, .92); color: #f1f3f5; padding: 10px 12px; border-radius: 8px; display: none; }
+           background: rgba(15, 18, 23, .92); color: #f1f3f5; padding: 10px 12px; border-radius: 8px; display: none; white-space: pre-line; }
   #notice { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px;
             color: #f1f3f5; text-align: center; }
   .place { color: #15181c; font-weight: 600; white-space: nowrap; transform: translate(-50%, -50%); width: max-content;
@@ -31,11 +31,44 @@
   .place.private { color: #fff; font-weight: 700;
            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 3px #000; }
   .place.off { display: none; }
-  .mark { transform: translate(-50%, -50%); box-sizing: border-box; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .7); }
-  .squad { width: 26px; height: 26px; border-radius: 5px; }
-  .squad.enemy { border-color: #220000; }
-  .unit { width: 13px; height: 13px; border-width: 1px; border-radius: 3px; }
-  .contact { width: 16px; height: 16px; background: #e62020; border-color: #220000; transform: translate(-50%, -50%) rotate(45deg); }
+  .mark { position: relative; transform: translate(-50%, -50%); box-sizing: border-box; }
+  .mark * { pointer-events: none; }
+  .fill { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .unit { --px: max(26px, calc(var(--w) * var(--k) * 1px)); width: var(--px); height: calc(var(--px) * var(--r)); }
+  .unit.side { outline: 2px solid var(--t); outline-offset: 1px; border-radius: 2px; }
+  .dmg { position: absolute; inset: 0; background: url(icons/damage.png) center / 100% 100%; }
+  .squad { --px: max(44px, calc(var(--w) * var(--k) * 1px)); width: var(--px); height: var(--px); background: rgba(20, 20, 20, .9);
+           border: calc(var(--px) * .07) solid var(--c); box-shadow: 0 1px 4px rgba(0, 0, 0, .7); }
+  .squad.side { outline: 2px solid var(--t); }
+  .squad.enemy { background: rgba(115, 10, 10, .95); isolation: isolate; }
+  .squad.enemy::after { content: ""; position: absolute; inset: 0; background: rgb(255, 89, 89); mix-blend-mode: multiply; }
+  .badge { position: absolute; width: 30%; height: 30%; object-fit: contain; transform: translate(-50%, -50%); }
+  .b-squad { left: 0; top: 0; width: 38%; height: 38%; }
+  .b-morale { left: 35%; top: 0; }
+  .b-special { left: 65%; top: 0; }
+  .b-owner { left: 100%; top: 0; }
+  .b-pushed { left: 0; top: 50%; }
+  .b-melee { left: 100%; top: 50%; }
+  .stance { position: absolute; left: 100%; top: 100%; width: 28%; height: 28%; transform: translate(-50%, -50%); }
+  .stance.assault, .stance.attack { background: #d92e2e; }
+  .stance.defence, .stance.hold { background: #3880e6; }
+  .stance.assault { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  .stance.hold { clip-path: polygon(0 0, 100% 0, 50% 100%); }
+  .army { position: absolute; left: 0; top: 0; background: rgba(0, 0, 0, .75); color: #fff; border-radius: 2px; padding: 0 2px;
+          font: 600 max(8px, calc(var(--px) * .15))/1.2 system-ui, sans-serif; white-space: nowrap; }
+  .unit .army { top: auto; bottom: 0; }
+  .under { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
+           gap: 1px; margin-top: 1px; min-width: 100%; }
+  .bar { position: relative; align-self: stretch; height: max(4px, calc(var(--px) * .15)); min-height: 4px; background: rgba(0, 0, 0, .75); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: #2fa84f; }
+  .bar.supply i { background: #d9a21b; }
+  .bar.pool i { background: #666; }
+  .bar b { position: absolute; inset: 0; color: #fff; text-align: center; font: 700 max(7px, calc(var(--px) * .13))/1 system-ui, sans-serif; display: flex; align-items: center; justify-content: center; }
+  .name { background: rgba(0, 0, 0, .75); color: #fff; border-radius: 2px; padding: 0 3px; white-space: nowrap;
+          font: 600 max(9px, calc(var(--px) * .14))/1.25 system-ui, sans-serif; }
+  .far .name, .far .bar b { display: none; }
+  .far .army { display: none; }
+  .contact { width: 16px; height: 16px; background: #e62020; border: 2px solid #220000; transform: translate(-50%, -50%) rotate(45deg); }
   .contact.friendly { background: #26b340; border-color: #001f05; }
   .leaflet-container { background: #181c22; font: inherit; }
 </style>
@@ -75,10 +108,10 @@ function show(site, V) {
   const bounds = L.latLngBounds(at(0, 0), at(site.width, site.height));
   // Map pixels are the coordinates, y down, zoom 0 = game scale.
   const crs = L.extend({}, L.CRS.Simple, { transformation: new L.Transformation(1, 0, 1, 0) });
-  const map = L.map("map", { crs, minZoom: site.min_zoom, maxZoom: 2, zoomSnap: 0.25, zoomControl: false,
+  const map = L.map("map", { crs, minZoom: site.min_zoom, maxZoom: 3, zoomSnap: 0.25, zoomControl: false,
                              attributionControl: false, maxBounds: bounds.pad(0.1), maxBoundsViscosity: 0.8 });
   L.tileLayer("tiles/z{z}/{x}_{y}.jpg?v=" + site.version,
-              { tileSize: 512, minZoom: site.min_zoom, maxZoom: 2, minNativeZoom: site.min_zoom, maxNativeZoom: 0, bounds, keepBuffer: 3 }).addTo(map);
+              { tileSize: 512, minZoom: site.min_zoom, maxZoom: 3, minNativeZoom: site.min_zoom, maxNativeZoom: 0, bounds, keepBuffer: 3 }).addTo(map);
 
   const strategic = L.layerGroup(), personal = L.layerGroup();
   const own = V.squads.filter(s => s.units !== undefined);
@@ -112,19 +145,66 @@ function show(site, V) {
   }
   map.on("zoomend moveend", declutter);
 
-  const add = (layer, item, cls, color, z, text) => {
-    const style = color ? ` style="background:${color}"` : "";
-    const icon = L.divIcon({ className: "", iconSize: null, html: `<div class="mark ${cls}"${style}></div>` });
+  // Pictures scale with the map like in the game, down to a size that stays readable.
+  function rescale() {
+    const zoom = map.getZoom();
+    map.getContainer().style.setProperty("--k", Math.pow(2, zoom));
+    map.getContainer().classList.toggle("far", zoom < -0.75);
+  }
+  map.on("zoomend", rescale);
+  rescale();
+
+  const place = (layer, item, html, z, text) => {
+    const icon = L.divIcon({ className: "", iconSize: null, html });
     const marker = L.marker(at(item.x, item.y), { icon, zIndexOffset: z, keyboard: false }).addTo(layer);
     marker.on("click", () => tell(text));
   };
-  const line = (...parts) => parts.filter(p => p).join(" · ");
-  for (const u of V.units) add(personal, u, "unit", u.color, 500, line(u.name, u.owner, u.strength !== undefined && `${u.strength}% strength`));
-  for (const s of V.squads) add(strategic, s, s.friendly ? "squad" : "squad enemy", s.color, 1000, line(s.name, s.owner, s.units !== undefined && `${s.units} units`));
+  const esc = text => String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const join = parts => parts.filter(p => p).join(" · ");
+  const badge = (on, kind) => on ? `<img class="badge b-${kind}" src="icons/${kind}.png" alt="">` : "";
+  const bar = (kind, value) => `<div class="bar ${kind}"><i style="width:${value}%"></i><b>${value}</b></div>`;
+  const side = item => item.team ? `--t:${item.team};` : "";
+
+  function unitHtml(u) {
+    const armor = u.pool ? bar("pool", u.armor) : u.strength === undefined ? "" : bar("strength", u.strength);
+    const supply = u.supply === undefined ? "" : bar("supply", u.supply);
+    const name = u.label ? `<div class="name">${esc(u.label)}</div>` : "";
+    return `<div class="mark unit${u.team ? " side" : ""}" style="--w:${u.w};--r:${(u.h / u.w).toFixed(3)};${side(u)}">` +
+      (u.icon ? `<img class="fill" src="icons/${u.icon}" alt="" style="transform:rotate(${u.rot}deg)">` : "") +
+      (u.damage ? `<div class="dmg" style="opacity:${u.damage}"></div>` : "") +
+      (u.squad ? `<img class="badge b-squad" src="icons/squad${u.squad}.png" alt="">` : "") +
+      badge(u.morale, "morale") + badge(u.special, "special") + badge(u.own, "owner") + badge(u.pushed, "pushed") + badge(u.melee, "melee") +
+      (u.mark ? `<div class="stance ${u.mark}"></div>` : "") +
+      (u.army ? `<div class="army">${esc(u.army)}</div>` : "") +
+      (armor || supply || name ? `<div class="under">${armor}${supply}${name}</div>` : "") + "</div>";
+  }
+  function unitText(u) {
+    return [join([u.name, u.owner]),
+      join([u.label, u.strength !== undefined && `${u.strength}% strength`, u.armor !== undefined && `${u.armor}% armor`,
+            u.supply !== undefined && `${u.supply}% supply`, u.stance]),
+      join([u.morale && "Morale lost", u.pushed && "Pushed back", u.melee && "In melee", u.special && "Special ready"])].filter(p => p).join("\n");
+  }
+  function squadHtml(s) {
+    const under = (s.strength === undefined ? "" : bar("strength", s.strength) + bar("supply", s.supply)) +
+      (s.title ? `<div class="name">${esc(s.title)}</div>` : "");
+    return `<div class="mark squad${s.friendly ? "" : " enemy"}${s.team ? " side" : ""}" style="--w:${s.w};--c:${s.color};${side(s)}">` +
+      (s.icon ? `<img class="fill" src="icons/${s.icon}" alt="">` : "") +
+      badge(s.morale, "morale") + badge(s.pushed, "pushed") + badge(s.melee, "melee") +
+      (s.army ? `<div class="army">${esc(s.army)}</div>` : "") +
+      (under ? `<div class="under">${under}</div>` : "") + "</div>";
+  }
+  function squadText(s) {
+    return [join([s.name, s.owner]),
+      join([s.units !== undefined && `${s.units} units`, s.strength !== undefined && `${s.strength}% strength`, s.supply !== undefined && `${s.supply}% supply`]),
+      join([s.morale && `${s.morale} morale lost`, s.pushed && `${s.pushed} pushed back`, s.melee && `${s.melee} in melee`])].filter(p => p).join("\n");
+  }
+  for (const u of V.units) place(personal, u, unitHtml(u), 500, unitText(u));
+  for (const s of V.squads) place(strategic, s, squadHtml(s), 1000, squadText(s));
   for (const c of V.contacts) {
-    const cls = c.friendly ? "contact friendly" : "contact", text = c.friendly ? "Friendly contact" : "Unidentified contact";
-    if (!c.known) add(strategic, c, cls, "", 1500, text);
-    add(personal, c, cls, "", 1500, text);
+    const cls = c.friendly ? "mark contact friendly" : "mark contact", text = c.friendly ? "Friendly contact" : "Unidentified contact";
+    const html = `<div class="${cls}"></div>`;
+    if (!c.known) place(strategic, c, html, 1500, text);
+    place(personal, c, html, 1500, text);
   }
 
   // Only commanders given Personal view have it in their file, so only they get the switch.
