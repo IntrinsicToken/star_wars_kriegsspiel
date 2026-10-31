@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Field Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  html, body, #map { height: 100%; margin: 0; background: #181c22; }
+  body { font: 14px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #bar { position: fixed; z-index: 1000; top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px;
+         display: flex; justify-content: space-between; gap: 8px; pointer-events: none; }
+  #bar span { background: rgba(15, 18, 23, .86); color: #f1f3f5; padding: 6px 10px; border-radius: 6px; }
+  #bar span:empty { display: none; }
+  #views { position: fixed; z-index: 1000; top: calc(max(8px, env(safe-area-inset-top)) + 40px); left: 50%;
+           transform: translateX(-50%); display: none; background: rgba(15, 18, 23, .86); border-radius: 8px; padding: 3px; }
+  #views button { font: inherit; color: #f1f3f5; background: none; border: 0; border-radius: 6px; padding: 8px 14px; min-height: 40px; }
+  #views button.on { background: #f1f3f5; color: #15181c; font-weight: 600; }
+  #teams { position: fixed; z-index: 1000; top: calc(max(8px, env(safe-area-inset-top)) + 92px); left: 50%; width: max-content; max-width: calc(100% - 16px);
+           transform: translateX(-50%); display: none; gap: 2px 10px; white-space: nowrap; flex-wrap: wrap; justify-content: center; box-sizing: border-box;
+           background: rgba(15, 18, 23, .86); color: #f1f3f5; font-size: 12px; border-radius: 6px; padding: 4px 10px; pointer-events: none; }
+  #teams i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+  #sheet { position: fixed; z-index: 1000; left: 8px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom));
+           background: rgba(15, 18, 23, .92); color: #f1f3f5; padding: 10px 12px; border-radius: 8px; display: none; }
+  #notice { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px;
+            color: #f1f3f5; text-align: center; }
+  .place { color: #15181c; font-weight: 600; white-space: nowrap; transform: translate(-50%, -50%); width: max-content;
+           text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 3px #fff; pointer-events: none; }
+  .place.private { color: #fff; font-weight: 700;
+           text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 0 3px #000; }
+  .place.off { display: none; }
+  .mark { transform: translate(-50%, -50%); box-sizing: border-box; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .7); }
+  .squad { width: 26px; height: 26px; border-radius: 5px; }
+  .squad.enemy { border-color: #220000; }
+  .unit { width: 13px; height: 13px; border-width: 1px; border-radius: 3px; }
+  .contact { width: 16px; height: 16px; background: #e62020; border-color: #220000; transform: translate(-50%, -50%) rotate(45deg); }
+  .contact.friendly { background: #26b340; border-color: #001f05; }
+  .leaflet-container { background: #181c22; font: inherit; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="bar"><span id="who"></span><span id="turn"></span></div>
+<div id="views"><button data-view="strategic">Strategic</button><button data-view="personal">Personal</button></div>
+<div id="teams"></div>
+<div id="sheet"></div>
+<div id="notice">Opening map…</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const notice = document.getElementById("notice");
+
+// See MapSite.gd for the file layout.
+async function decrypt(data, keyText) {
+  const key = Uint8Array.from(atob(keyText.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+  const derive = n => {
+    const bytes = new Uint8Array(key.length + 1);
+    bytes.set(key);
+    bytes[key.length] = n;
+    return crypto.subtle.digest("SHA-256", bytes);
+  };
+  const macKey = await crypto.subtle.importKey("raw", await derive(2), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  const ok = await crypto.subtle.verify("HMAC", macKey, data.slice(-32), data.slice(0, -32));
+  if (!ok) throw new Error("wrong key");
+  const aesKey = await crypto.subtle.importKey("raw", await derive(1), "AES-CBC", false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-CBC", iv: data.slice(0, 16) }, aesKey, data.slice(16, -32));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+function show(site, V) {
+  document.getElementById("who").textContent = V.commander;
+  document.getElementById("turn").textContent = V.turn;
+  const at = (x, y) => L.latLng(y, x);
+  const bounds = L.latLngBounds(at(0, 0), at(site.width, site.height));
+  // Map pixels are the coordinates, y down, zoom 0 = game scale.
+  const crs = L.extend({}, L.CRS.Simple, { transformation: new L.Transformation(1, 0, 1, 0) });
+  const map = L.map("map", { crs, minZoom: site.min_zoom, maxZoom: 2, zoomSnap: 0.25, zoomControl: false,
+                             attributionControl: false, maxBounds: bounds.pad(0.1), maxBoundsViscosity: 0.8 });
+  L.tileLayer("tiles/z{z}/{x}_{y}.jpg?v=" + site.version,
+              { tileSize: 512, minZoom: site.min_zoom, maxZoom: 2, minNativeZoom: site.min_zoom, maxNativeZoom: 0, bounds, keepBuffer: 3 }).addTo(map);
+
+  const strategic = L.layerGroup(), personal = L.layerGroup();
+  const own = V.squads.filter(s => s.units !== undefined);
+  const focus = own.length ? own : V.squads.length ? V.squads : V.units;
+  if (focus.length) map.fitBounds(L.latLngBounds(focus.map(p => at(p.x, p.y))).pad(0.35), { maxZoom: -1 });
+  else map.fitBounds(bounds);
+
+  const sheet = document.getElementById("sheet");
+  const tell = text => { sheet.textContent = text; sheet.style.display = "block"; };
+  map.on("click", () => { sheet.style.display = "none"; });
+
+  // Labels stay one size on screen. Where they would overlap the biggest show
+  // and the rest appear as you zoom in.
+  const labels = V.labels.slice().sort((a, b) => (b.private - a.private) || (b.size - a.size)).map(l => {
+    const px = Math.round(11 + l.size * 0.28) + (l.private ? 1 : 0);
+    const icon = L.divIcon({ className: "", iconSize: null,
+      html: `<div class="place${l.private ? " private" : ""}" style="font-size:${px}px"></div>` });
+    const marker = L.marker(at(l.x, l.y), { icon, interactive: false, keyboard: false }).addTo(map);
+    const node = marker.getElement().firstChild;
+    node.textContent = l.name;
+    return node;
+  });
+  function declutter() {
+    const taken = [];
+    for (const node of labels) {
+      node.classList.remove("off");
+      const b = node.getBoundingClientRect();
+      const clash = taken.some(t => b.left < t.right + 4 && b.right > t.left - 4 && b.top < t.bottom + 2 && b.bottom > t.top - 2);
+      if (clash) node.classList.add("off"); else taken.push(b);
+    }
+  }
+  map.on("zoomend moveend", declutter);
+
+  const add = (layer, item, cls, color, z, text) => {
+    const style = color ? ` style="background:${color}"` : "";
+    const icon = L.divIcon({ className: "", iconSize: null, html: `<div class="mark ${cls}"${style}></div>` });
+    const marker = L.marker(at(item.x, item.y), { icon, zIndexOffset: z, keyboard: false }).addTo(layer);
+    marker.on("click", () => tell(text));
+  };
+  const line = (...parts) => parts.filter(p => p).join(" · ");
+  for (const u of V.units) add(personal, u, "unit", u.color, 500, line(u.name, u.owner, u.strength !== undefined && `${u.strength}% strength`));
+  for (const s of V.squads) add(strategic, s, s.friendly ? "squad" : "squad enemy", s.color, 1000, line(s.name, s.owner, s.units !== undefined && `${s.units} units`));
+  for (const c of V.contacts) {
+    const cls = c.friendly ? "contact friendly" : "contact", text = c.friendly ? "Friendly contact" : "Unidentified contact";
+    if (!c.known) add(strategic, c, cls, "", 1500, text);
+    add(personal, c, cls, "", 1500, text);
+  }
+
+  // Only commanders given Personal view have it in their file, so only they get the switch.
+  const buttons = document.querySelectorAll("#views button");
+  function choose(name) {
+    (name === "personal" ? strategic : personal).remove();
+    (name === "personal" ? personal : strategic).addTo(map);
+    buttons.forEach(b => b.classList.toggle("on", b.dataset.view === name));
+    sheet.style.display = "none";
+    try { localStorage.setItem("view", name); } catch (e) {}
+  }
+  let start = "strategic";
+  if (V.personal) {
+    document.getElementById("views").style.display = "flex";
+    buttons.forEach(b => b.addEventListener("click", () => choose(b.dataset.view)));
+    try { if (localStorage.getItem("view") === "personal") start = "personal"; } catch (e) {}
+  }
+  if (V.teams) {
+    buttons[1].textContent = "All units";
+    const legend = document.getElementById("teams");
+    for (const team of V.teams) {
+      const entry = document.createElement("span"), dot = document.createElement("i");
+      dot.style.background = team.color;
+      entry.append(dot, team.name);
+      legend.append(entry);
+    }
+    legend.style.display = "flex";
+  }
+  choose(start);
+  declutter();
+  notice.remove();
+}
+
+(async () => {
+  const id = new URLSearchParams(location.search).get("c");
+  const key = location.hash.slice(1);
+  if (!id || !key) { notice.textContent = "This page needs your commander link."; return; }
+  try {
+    const stamp = Date.now();
+    const site = await (await fetch("site.json?t=" + stamp, { cache: "no-store" })).json();
+    const reply = await fetch(`data/${id}.bin?t=${stamp}`, { cache: "no-store" });
+    if (!reply.ok) throw new Error("no file");
+    show(site, await decrypt(await reply.arrayBuffer(), key));
+  } catch (e) {
+    notice.textContent = "This link isn't working. Ask your umpire for a new one.";
+  }
+})();
+</script>
+</body>
+</html>
